@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api, { getErrorMessage } from "../api/client";
+import { formatProductName } from "../utils/format";
 
 export default function DashboardPage() {
   const [data, setData] = useState(null);
@@ -31,7 +32,7 @@ export default function DashboardPage() {
                 <h2 className="font-semibold text-white">Low stock items</h2>
                 <p className="mt-1 text-sm text-muted">Products at or below their reorder threshold.</p>
               </div>
-              <span className="rounded-full border border-amber-900/60 bg-amber-950/40 px-2.5 py-1 text-xs font-medium text-amber-300">{data.low_stock_items.length} items</span>
+              <span className="rounded-full border border-amber-900/60 bg-amber-950/40 px-2.5 py-1 text-xs font-medium text-amber-300">{data.low_stock_items.length} {data.low_stock_items.length === 1 ? "item" : "items"}</span>
             </div>
             {data.low_stock_items.length ? (
               <TableWrap>
@@ -42,7 +43,7 @@ export default function DashboardPage() {
                   <tbody className="divide-y divide-border/70">
                     {data.low_stock_items.map((item) => (
                       <tr key={item.sku} className="hover:bg-white/[0.02]">
-                        <td className="whitespace-nowrap px-6 py-4 font-medium text-slate-100">{item.name}</td>
+                        <td className="whitespace-nowrap px-6 py-4 font-medium text-slate-100">{formatProductName(item.name)}</td>
                         <td className="whitespace-nowrap px-6 py-4 text-slate-400">{item.sku}</td>
                         <td className="whitespace-nowrap px-6 py-4 font-semibold text-amber-300">{item.quantity_on_hand}</td>
                         <td className="whitespace-nowrap px-6 py-4 text-slate-400">{item.threshold}</td>

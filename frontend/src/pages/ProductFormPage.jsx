@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import toast from "react-hot-toast";
 import api, { getErrorMessage } from "../api/client";
-import ProductImage from "../components/ProductImage";
 import { InlineError, LoadingState, PageHeading } from "./DashboardPage";
 
 const initialForm = {
@@ -12,6 +12,7 @@ const initialForm = {
   cost_price: "",
   selling_price: "",
   low_stock_threshold: "",
+  image_url: "",
 };
 
 function NumberField({ id, label, value, onChange, ...props }) {
@@ -26,26 +27,11 @@ function NumberField({ id, label, value, onChange, ...props }) {
 export default function ProductFormPage() {
   const { productId } = useParams();
   const editing = Boolean(productId);
-  const location = useLocation();
   const navigate = useNavigate();
   const [form, setForm] = useState(initialForm);
-  const [error, setError] = useState(location.state?.imageError || "");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(editing);
   const [saving, setSaving] = useState(false);
-  const [imageFile, setImageFile] = useState(location.state?.pendingImage || null);
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [hasImage, setHasImage] = useState(false);
-  const [removeImage, setRemoveImage] = useState(false);
-
-  useEffect(() => {
-    if (!imageFile) {
-      setPreviewUrl("");
-      return undefined;
-    }
-    const objectUrl = URL.createObjectURL(imageFile);
-    setPreviewUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [imageFile]);
 
   useEffect(() => {
     if (!editing) return;
@@ -61,8 +47,8 @@ export default function ProductFormPage() {
             cost_price: data.cost_price ?? "",
             selling_price: data.selling_price ?? "",
             low_stock_threshold: data.low_stock_threshold ?? "",
+            image_url: data.image_url ?? "",
           });
-          setHasImage(Boolean(data.image_url));
         }
       })
       .catch((requestError) => active && setError(getErrorMessage(requestError)))
@@ -72,27 +58,6 @@ export default function ProductFormPage() {
 
   const change = (event) => {
     setForm({ ...form, [event.target.name]: event.target.value });
-    setError("");
-  };
-
-  const selectImage = (event) => {
-    const file = event.target.files?.[0] || null;
-    if (!file) return;
-    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    if (!allowedTypes.includes(file.type)) {
-      setImageFile(null);
-      setError("Choose a JPEG, PNG, GIF, or WebP image.");
-      event.target.value = "";
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setImageFile(null);
-      setError("Product images must be 5 MB or smaller.");
-      event.target.value = "";
-      return;
-    }
-    setImageFile(file);
-    setRemoveImage(false);
     setError("");
   };
 
@@ -123,41 +88,22 @@ export default function ProductFormPage() {
       cost_price: form.cost_price === "" ? null : Number(form.cost_price),
       selling_price: form.selling_price === "" ? null : Number(form.selling_price),
       low_stock_threshold: form.low_stock_threshold === "" ? null : Number(form.low_stock_threshold),
+      image_url: form.image_url.trim() || null,
     };
     setSaving(true);
     setError("");
-    let createdProductId = null;
     try {
       if (editing) {
-        createdProductId = productId;
         await api.put(`/products/${productId}`, payload);
       } else {
-        const { data } = await api.post("/products", payload);
-        createdProductId = data.id;
+        await api.post("/products", payload);
       }
-
-      if (imageFile) {
-        const imagePayload = new FormData();
-        imagePayload.append("image", imageFile);
-        await api.put(`/products/${createdProductId}/image`, imagePayload, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-      } else if (editing && removeImage) {
-        await api.delete(`/products/${productId}/image`);
-      }
+      toast.success(editing ? "Product updated." : "Product added.");
       navigate("/products", { replace: true });
     } catch (requestError) {
-      if (!editing && createdProductId !== null && imageFile) {
-        navigate(`/products/${createdProductId}/edit`, {
-          replace: true,
-          state: {
-            pendingImage: imageFile,
-            imageError: `Product created, but its image could not be uploaded: ${getErrorMessage(requestError)}`,
-          },
-        });
-        return;
-      }
-      setError(getErrorMessage(requestError));
+      const message = getErrorMessage(requestError);
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -176,32 +122,8 @@ export default function ProductFormPage() {
         </div>
         <div><label className="label" htmlFor="description">Description</label><textarea className="field min-h-24 resize-y" id="description" name="description" value={form.description} onChange={change} maxLength={2000} /></div>
         <div>
-          <label className="label" htmlFor="product-image">Product image</label>
-          <p className="mt-1 text-sm text-muted">JPEG, PNG, GIF, or WebP, up to 5 MB.</p>
-          <div className="mt-3 flex flex-wrap items-center gap-4">
-            {imageFile ? (
-              <img src={previewUrl} alt="Selected product preview" className="h-24 w-24 rounded-xl border border-border object-cover" />
-            ) : hasImage && !removeImage ? (
-              <ProductImage imageUrl={`/api/products/${productId}/image`} alt="Current product" className="h-24 w-24" />
-            ) : (
-              <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-dashed border-border bg-[#171c28] text-xs text-slate-500">No image</div>
-            )}
-            <div className="space-y-2">
-              <input
-                className="block max-w-full text-sm text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-[#202738] file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-200 hover:file:bg-[#2a3448]"
-                id="product-image"
-                type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
-                onChange={selectImage}
-              />
-              {editing && hasImage && !removeImage && !imageFile && (
-                <button type="button" className="text-sm font-medium text-red-300 hover:text-red-200" onClick={() => setRemoveImage(true)}>Remove current image</button>
-              )}
-              {removeImage && (
-                <button type="button" className="text-sm font-medium text-slate-300 hover:text-white" onClick={() => setRemoveImage(false)}>Keep current image</button>
-              )}
-            </div>
-          </div>
+          <label className="label" htmlFor="image_url">Image URL</label>
+          <input className="field mt-1.5" id="image_url" name="image_url" type="url" maxLength={2048} placeholder="https://example.com/product.jpg" value={form.image_url} onChange={change} />
         </div>
         <div className="grid gap-5 sm:grid-cols-2">
           <NumberField id="quantity_on_hand" label="Quantity on hand" value={form.quantity_on_hand} onChange={change} min="0" step="1" required />

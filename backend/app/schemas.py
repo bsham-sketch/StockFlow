@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -87,6 +87,7 @@ class ProductBase(BaseModel):
     cost_price: NonNegativePrice | None = None
     selling_price: NonNegativePrice | None = None
     low_stock_threshold: NonNegativeInt | None = None
+    image_url: Annotated[str | None, Field(max_length=2048)] = None
 
     @field_validator("name", "sku")
     @classmethod
@@ -94,6 +95,18 @@ class ProductBase(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("This field cannot be blank.")
+        return normalized
+
+    @field_validator("image_url")
+    @classmethod
+    def normalize_image_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if not normalized.startswith(("https://", "http://")):
+            raise ValueError("Image URL must start with http:// or https://.")
         return normalized
 
 
@@ -109,6 +122,7 @@ class ProductUpdate(BaseModel):
     cost_price: NonNegativePrice | None = None
     selling_price: NonNegativePrice | None = None
     low_stock_threshold: NonNegativeInt | None = None
+    image_url: Annotated[str | None, Field(max_length=2048)] = None
 
     @field_validator("name", "sku")
     @classmethod
@@ -120,6 +134,25 @@ class ProductUpdate(BaseModel):
             raise ValueError("This field cannot be blank.")
         return normalized
 
+    @field_validator("image_url")
+    @classmethod
+    def normalize_image_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if not normalized.startswith(("https://", "http://")):
+            raise ValueError("Image URL must start with http:// or https://.")
+        return normalized
+
+    @field_validator("quantity_on_hand")
+    @classmethod
+    def validate_quantity(cls, value: int | None) -> int:
+        if value is None:
+            raise ValueError("Quantity on hand cannot be null.")
+        return value
+
 
 class ProductResponse(ProductBase):
     model_config = ConfigDict(from_attributes=True)
@@ -129,7 +162,8 @@ class ProductResponse(ProductBase):
     created_at: datetime
     updated_at: datetime
     last_updated_by: int
-    image_url: str | None = None
+    effective_threshold: int = 0
+    status: Literal["Out of stock", "Low stock", "In stock"] = "In stock"
 
 
 class StockAdjustment(BaseModel):

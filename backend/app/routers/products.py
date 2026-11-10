@@ -1,28 +1,23 @@
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Product, ProductImage, User
+from app.inventory import get_stock_status
+from app.models import Product, User
 from app.schemas import ProductCreate, ProductResponse, ProductUpdate, StockAdjustment
 
 router = APIRouter(prefix="/api/products", tags=["products"])
-MAX_IMAGE_SIZE = 5 * 1024 * 1024
-IMAGE_SIGNATURES = {
-    "image/jpeg": lambda data: data.startswith(b"\xff\xd8\xff"),
-    "image/png": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
-    "image/gif": lambda data: data.startswith((b"GIF87a", b"GIF89a")),
-    "image/webp": lambda data: len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP",
-}
 
 
-def _product_response(product: Product, image_present: bool) -> ProductResponse:
+def _product_response(product: Product, default_threshold: int) -> ProductResponse:
     response = ProductResponse.model_validate(product)
-    if image_present:
-        return response.model_copy(update={"image_url": f"/products/{product.id}/image"})
-    return response
+    effective_threshold, stock_status = get_stock_status(product, default_threshold)
+    return response.model_copy(
+        update={"effective_threshold": effective_threshold, "status": stock_status}
+    )
 
 
 def _get_product(db: Session, product_id: int, organization_id: int) -> Product:
@@ -45,11 +40,11 @@ def _ensure_unique_sku(
     if exclude_id is not None:
         query = query.filter(Product.id != exclude_id)
     if query.first():
-        raise HTTPException(status_code=409, detail="A product with this SKU already exists.")
+            raise HTTPException(status_code=409, detail="SKU already exists")
 
 
 def _duplicate_sku_error() -> HTTPException:
-    return HTTPException(status_code=409, detail="A product with this SKU already exists.")
+    return HTTPException(status_code=409, detail="SKU already exists")
 
 
 @router.post("", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
@@ -71,7 +66,7 @@ def create_product(
         db.rollback()
         raise _duplicate_sku_error() from None
     db.refresh(product)
-    return _product_response(product, False)
+    return _product_response(product, user.organization.default_low_stock_threshold)
 
 
 @router.get("", response_model=list[ProductResponse])
@@ -80,17 +75,14 @@ def list_products(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ProductResponse]:
-    query = (
-        db.query(Product, ProductImage.product_id.is_not(None))
-        .outerjoin(ProductImage, ProductImage.product_id == Product.id)
-        .filter(Product.organization_id == user.organization_id)
-    )
+    query = db.query(Product).filter(Product.organization_id == user.organization_id)
     if search and search.strip():
         term = f"%{search.strip()}%"
         query = query.filter(or_(Product.name.ilike(term), Product.sku.ilike(term)))
+    threshold = user.organization.default_low_stock_threshold
     return [
-        _product_response(product, image_present)
-        for product, image_present in query.order_by(Product.name.asc(), Product.id.asc()).all()
+        _product_response(product, threshold)
+        for product in query.order_by(Product.name.asc(), Product.id.asc()).all()
     ]
 
 
@@ -101,72 +93,7 @@ def get_product(
     user: User = Depends(get_current_user),
 ) -> ProductResponse:
     product = _get_product(db, product_id, user.organization_id)
-    return _product_response(product, product.image is not None)
-
-
-@router.put("/{product_id}/image", response_model=ProductResponse)
-async def upload_product_image(
-    product_id: int,
-    image: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> ProductResponse:
-    product = _get_product(db, product_id, user.organization_id)
-    content = await image.read(MAX_IMAGE_SIZE + 1)
-    if len(content) > MAX_IMAGE_SIZE:
-        raise HTTPException(status_code=413, detail="Product images must be 5 MB or smaller.")
-
-    content_type = next(
-        (kind for kind, matches in IMAGE_SIGNATURES.items() if matches(content)),
-        None,
-    )
-    if content_type is None:
-        raise HTTPException(
-            status_code=415,
-            detail="Use a valid JPEG, PNG, GIF, or WebP image.",
-        )
-
-    if product.image is None:
-        product.image = ProductImage(content_type=content_type, content=content)
-    else:
-        product.image.content_type = content_type
-        product.image.content = content
-    product.last_updated_by = user.id
-    db.commit()
-    db.refresh(product)
-    return _product_response(product, True)
-
-
-@router.get("/{product_id}/image")
-def get_product_image(
-    product_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> Response:
-    product = _get_product(db, product_id, user.organization_id)
-    if product.image is None:
-        raise HTTPException(status_code=404, detail="Product image not found.")
-    return Response(
-        content=product.image.content,
-        media_type=product.image.content_type,
-        headers={
-            "Cache-Control": "private, max-age=3600",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
-
-
-@router.delete("/{product_id}/image", status_code=status.HTTP_204_NO_CONTENT)
-def delete_product_image(
-    product_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> Response:
-    product = _get_product(db, product_id, user.organization_id)
-    if product.image is not None:
-        db.delete(product.image)
-        db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return _product_response(product, user.organization.default_low_stock_threshold)
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
@@ -189,7 +116,7 @@ def update_product(
         db.rollback()
         raise _duplicate_sku_error() from None
     db.refresh(product)
-    return _product_response(product, product.image is not None)
+    return _product_response(product, user.organization.default_low_stock_threshold)
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -221,4 +148,4 @@ def adjust_stock(
     product.last_updated_by = user.id
     db.commit()
     db.refresh(product)
-    return _product_response(product, product.image is not None)
+    return _product_response(product, user.organization.default_low_stock_threshold)

@@ -53,8 +53,18 @@ def upgrade_existing_usernames(database_engine=engine) -> None:
             )
 
 
+def upgrade_product_image_url(database_engine=engine) -> None:
+    product_columns = {
+        column["name"] for column in inspect(database_engine).get_columns("products")
+    }
+    if "image_url" not in product_columns:
+        with database_engine.begin() as connection:
+            connection.execute(text("ALTER TABLE products ADD COLUMN image_url VARCHAR(2048)"))
+
+
 def initialize_database() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     upgrade_existing_usernames()
+    upgrade_product_image_url()

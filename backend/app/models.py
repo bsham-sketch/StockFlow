@@ -5,7 +5,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
-    LargeBinary,
     Numeric,
     String,
     UniqueConstraint,
@@ -66,6 +65,7 @@ class Product(Base):
     cost_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     selling_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     low_stock_threshold: Mapped[int | None] = mapped_column(Integer)
+    image_url: Mapped[str | None] = mapped_column(String(2048))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -80,24 +80,3 @@ class Product(Base):
     )
 
     organization: Mapped[Organization] = relationship(back_populates="products")
-    image: Mapped["ProductImage | None"] = relationship(
-        back_populates="product", cascade="all, delete-orphan", uselist=False
-    )
-
-
-class ProductImage(Base):
-    __tablename__ = "product_images"
-
-    product_id: Mapped[int] = mapped_column(
-        ForeignKey("products.id", ondelete="CASCADE"), primary_key=True
-    )
-    content_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    product: Mapped[Product] = relationship(back_populates="image")

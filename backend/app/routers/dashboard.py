@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.inventory import get_stock_status
 from app.models import Organization, Product, User
 from app.schemas import DashboardResponse, LowStockItem
 
@@ -27,32 +28,28 @@ def get_dashboard(
         .one()
     )
 
-    low_stock_products = (
+    products = (
         db.query(Product)
-        .filter(
-            Product.organization_id == user.organization_id,
-            Product.quantity_on_hand
-            <= func.coalesce(
-                Product.low_stock_threshold, organization.default_low_stock_threshold
-            ),
-        )
+        .filter(Product.organization_id == user.organization_id)
         .order_by(Product.quantity_on_hand.asc(), Product.name.asc())
         .all()
     )
+    low_stock_items = []
+    for product in products:
+        threshold, stock_status = get_stock_status(
+            product, organization.default_low_stock_threshold
+        )
+        if stock_status != "In stock":
+            low_stock_items.append(
+                LowStockItem(
+                    name=product.name,
+                    sku=product.sku,
+                    quantity_on_hand=product.quantity_on_hand,
+                    threshold=threshold,
+                )
+            )
     return DashboardResponse(
         total_products=summary[0],
         total_quantity=summary[1],
-        low_stock_items=[
-            LowStockItem(
-                name=product.name,
-                sku=product.sku,
-                quantity_on_hand=product.quantity_on_hand,
-                threshold=(
-                    product.low_stock_threshold
-                    if product.low_stock_threshold is not None
-                    else organization.default_low_stock_threshold
-                ),
-            )
-            for product in low_stock_products
-        ],
+        low_stock_items=low_stock_items,
     )

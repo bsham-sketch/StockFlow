@@ -21,7 +21,11 @@ export default function SettingsPage() {
   const submit = async (event) => {
     event.preventDefault();
     const value = Number(threshold);
-    if (!Number.isInteger(value) || value < 0) return setError("Enter a non-negative whole number.");
+    if (!Number.isInteger(value) || value < 0) {
+      setError("Enter a non-negative whole number.");
+      toast.error("Enter a non-negative whole number.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -29,18 +33,20 @@ export default function SettingsPage() {
       setThreshold(String(data.default_low_stock_threshold));
       toast.success("Settings saved.");
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      const message = getErrorMessage(requestError);
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="max-w-3xl">
+    <div className="mx-auto max-w-2xl">
       <PageHeading title="Settings" subtitle="Set inventory defaults for your organization." />
       {error && <InlineError message={error} />}
       {loading ? <LoadingState label="Loading settings..." /> : (
-        <form onSubmit={submit} className="mt-7 rounded-2xl border border-border bg-surface p-6 sm:p-8">
+        <form onSubmit={submit} className="mt-7 w-full rounded-2xl border border-border bg-surface p-6 sm:p-8">
           <div className="max-w-lg">
             <label className="label" htmlFor="threshold">Default low-stock threshold</label>
             <p className="mt-1 text-sm text-muted">Products without a custom threshold are marked low stock at or below this quantity.</p>

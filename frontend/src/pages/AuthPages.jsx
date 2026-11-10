@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import { getErrorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
@@ -44,9 +45,12 @@ export function LoginPage() {
     setBusy(true);
     try {
       await login({ email: form.email.trim(), password: form.password });
+      toast.success("Logged in.");
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      const message = getErrorMessage(requestError);
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -94,9 +98,12 @@ export function SignupPage() {
         email: form.email.trim(),
         password: form.password,
       });
+      toast.success("Your organization is ready.");
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      const message = getErrorMessage(requestError);
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
